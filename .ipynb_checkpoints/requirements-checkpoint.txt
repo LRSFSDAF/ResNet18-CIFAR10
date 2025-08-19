@@ -1,0 +1,5 @@
+torch torchvision --index-url https://download.pytorch.org/whl/cu129
+matplotlib
+seaborn
+pandas
+scikit-learn

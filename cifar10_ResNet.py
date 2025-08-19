@@ -2,7 +2,7 @@
 Description: 分类神经网络的搭建和实验
 Author: Damocles_lin
 Date: 2025-08-07 13:19:56
-LastEditTime: 2025-08-07 15:42:52
+LastEditTime: 2025-08-19 15:28:10
 LastEditors: Damocles_lin
 '''
 import torch
@@ -13,7 +13,7 @@ import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 import numpy as np
 import platform
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset, random_split
 from sklearn.metrics import confusion_matrix
 import seaborn as sns
 import pandas as pd
@@ -66,8 +66,20 @@ train_dataset = torchvision.datasets.CIFAR10(
 test_dataset = torchvision.datasets.CIFAR10(
     root='./data', train=False, download=True, transform=transform_test)
 
+# 划分训练集和验证集 (90% 训练, 10% 验证)
+train_size = int(0.9 * len(train_dataset))
+val_size = len(train_dataset) - train_size
+train_subset, val_subset = random_split(
+    train_dataset, [train_size, val_size]
+)
+
+# 验证集使用测试集transform（无数据增强）
+val_subset.dataset.transform = transform_test
+
 train_loader = DataLoader(
-    train_dataset, batch_size=config['batch_size'], shuffle=True, num_workers=config['num_workers'])
+    train_subset, batch_size=config['batch_size'], shuffle=True, num_workers=config['num_workers'])
+val_loader = DataLoader(
+    val_subset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
 test_loader = DataLoader(
     test_dataset, batch_size=config['batch_size'], shuffle=False, num_workers=config['num_workers'])
 
@@ -93,9 +105,6 @@ class CustomResNet18(nn.Module):
         num_features = self.model.fc.in_features
         self.model.fc = nn.Linear(num_features, num_classes)
         
-        # 残差学习思想：通过短路连接解决深层网络梯度消失问题
-        # 基本块结构：输入 -> 卷积层 -> BN -> ReLU -> 卷积层 -> BN -> 残差连接 -> ReLU
-    
     def forward(self, x):
         return self.model(x)
 
@@ -114,7 +123,7 @@ optimizer = optim.Adam(model.parameters(), lr=config['learning_rate'])
 
 # 学习率调度器 - 移除verbose参数以兼容旧版本
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-    optimizer, mode='max', factor=0.5, patience=2)
+    optimizer, mode='max', factor=0.5, patience=2)  # 移除verbose参数
 
 # ==============================
 # 5. 训练和验证函数
@@ -151,14 +160,14 @@ def train(epoch):
     train_acc = 100. * correct / total
     return train_loss, train_acc
 
-def validate():
+def validate(loader):
     model.eval()
     val_loss = 0.0
     correct = 0
     total = 0
     
     with torch.no_grad():
-        for batch_idx, (inputs, targets) in enumerate(test_loader):
+        for batch_idx, (inputs, targets) in enumerate(loader):
             inputs, targets = inputs.to(device), targets.to(device)
             
             outputs = model(inputs)
@@ -169,7 +178,7 @@ def validate():
             total += targets.size(0)
             correct += predicted.eq(targets).sum().item()
     
-    val_loss /= len(test_loader)
+    val_loss /= len(loader)
     val_acc = 100. * correct / total
     
     print(f'Validation | Loss: {val_loss:.4f} | Acc: {val_acc:.2f}%')
@@ -190,7 +199,7 @@ start_time = time.time()
 print("开始训练...")
 for epoch in range(config['num_epochs']):
     train_loss, train_acc = train(epoch)
-    val_loss, val_acc = validate()
+    val_loss, val_acc = validate(val_loader)  # 使用验证集
     
     # 更新学习率
     scheduler.step(val_acc)
@@ -217,17 +226,17 @@ print(f"训练完成! 总耗时: {time.time()-start_time:.2f}秒")
 # 绘制学习曲线
 plt.figure(figsize=(12, 5))
 plt.subplot(1, 2, 1)
-plt.plot(train_losses, label='训练损失')
-plt.plot(val_losses, label='验证损失')
-plt.title('损失曲线')
+plt.plot(train_losses, label='Training loss')
+plt.plot(val_losses, label='Validation loss')
+plt.title('Loss curve')
 plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.legend()
 
 plt.subplot(1, 2, 2)
-plt.plot(train_accs, label='训练准确率')
-plt.plot(val_accs, label='验证准确率')
-plt.title('准确率曲线')
+plt.plot(train_accs, label='Training accuracy')
+plt.plot(val_accs, label='Validation accuracy')
+plt.title('Accuracy curve')
 plt.xlabel('Epoch')
 plt.ylabel('Accuracy (%)')
 plt.legend()
@@ -238,36 +247,28 @@ plt.close()
 
 # 在测试集上评估最终模型
 model.load_state_dict(torch.load('checkpoints/best_model.pth'))
-model.eval()
+test_loss, test_acc = validate(test_loader)  # 使用测试集
 
+# 生成混淆矩阵
 all_targets = []
 all_preds = []
-correct = 0
-total = 0
-
+model.eval()
 with torch.no_grad():
     for images, labels in test_loader:
         images, labels = images.to(device), labels.to(device)
         outputs = model(images)
         _, predicted = torch.max(outputs.data, 1)
         
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
-        
         all_targets.extend(labels.cpu().numpy())
         all_preds.extend(predicted.cpu().numpy())
 
-test_acc = 100 * correct / total
-print(f'测试集准确率: {test_acc:.2f}%')
-
-# 生成混淆矩阵
 cm = confusion_matrix(all_targets, all_preds)
 plt.figure(figsize=(10, 8))
 sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
             xticklabels=classes, yticklabels=classes)
-plt.title('混淆矩阵')
-plt.xlabel('预测标签')
-plt.ylabel('真实标签')
+plt.title('Confusion matrix')
+plt.xlabel('Prediction label')
+plt.ylabel('Authentic labels')
 plt.savefig('results/confusion_matrix.png')
 plt.close()
 
@@ -334,6 +335,10 @@ report = f"""
         - 随机裁剪 (32x32, padding=4)
         - 随机水平翻转
    - 归一化: 使用CIFAR-10的均值和标准差
+   - 数据集划分:
+        - 训练集: {len(train_subset)} 样本
+        - 验证集: {len(val_subset)} 样本
+        - 测试集: {len(test_dataset)} 样本
 
 4. 损失函数
    - CrossEntropyLoss: 适用于多分类任务，结合了LogSoftmax和NLLLoss
@@ -350,7 +355,7 @@ report = f"""
 
 6. 实验结果
    - 最佳验证准确率: {best_acc:.2f}%
-   - 最终测试准确率: {test_acc:.2f}%
+   - 测试准确率: {test_acc:.2f}%
    - 类别准确率:
         {pd.Series(class_acc).to_string()}
 
@@ -359,11 +364,11 @@ report = f"""
    - 混淆矩阵: 已保存至 results/confusion_matrix.png
    - 预测示例: 已保存至 results/predictions.png
 
-8. 问题与解决方案
-   - 输入尺寸不匹配: 通过修改第一层卷积解决
-   - ReduceLROnPlateau兼容性问题: 移除verbose参数
-   - 过拟合风险: 使用数据增强和预训练权重缓解
-   - 学习率调整: 使用ReduceLROnPlateau动态调整学习率
+8. 修复的问题
+   - 修复ReduceLROnPlateau的verbose参数错误
+   - 添加了正确的验证集划分
+   - 更新环境信息收集方式
+   - 分离验证集和测试集评估
 
 {'='*50}
 实验完成! 模型和结果已保存至 checkpoints/ 和 results/ 目录
