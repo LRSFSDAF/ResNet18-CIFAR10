@@ -1,4 +1,7 @@
+__pycache__/
 .vscode/
 checkpoints/
 data/
 results/
+demo_ResNet18.ipynb
+demo_cifar10_ResNet.py
