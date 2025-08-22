@@ -2,7 +2,7 @@
 Description: 
 Author: Damocles_lin
 Date: 2025-08-20 15:07:38
-LastEditTime: 2025-08-21 22:46:44
+LastEditTime: 2025-08-22 20:47:48
 LastEditors: Damocles_lin
 '''
 import matplotlib.pyplot as plt
@@ -25,16 +25,20 @@ def plot_learning_curves(train_losses, val_losses, train_accs, val_accs):
         
     Returns:
         None: 函数直接保存图像文件，不返回任何值
-    """    
+    """
+    x1_coordinates = [i + 1 for i in range(len(train_losses))]
+    x2_coordinates = [i + 1 for i in range(len(val_losses))]    
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
-    plt.plot(train_losses, label='Training loss')
-    plt.plot(val_losses, label='Validation loss')
+    plt.plot(x1_coordinates, train_losses, label='Training loss')
+    plt.plot(x2_coordinates, val_losses, label='Validation loss')
     plt.title('Loss curve')
     plt.xlabel('Epoch')
     plt.ylabel('Loss')
     plt.legend()
 
+    x1_coordinates = [i + 1 for i in range(len(train_accs))]
+    x2_coordinates = [i + 1 for i in range(len(val_accs))] 
     plt.subplot(1, 2, 2)
     plt.plot(train_accs, label='Training accuracy')
     plt.plot(val_accs, label='Validation accuracy')
